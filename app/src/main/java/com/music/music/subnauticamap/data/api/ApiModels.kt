@@ -89,3 +89,88 @@ data class ErrorResponse(
     @SerializedName("error") val error: String,
     @SerializedName("message") val message: String
 )
+
+/**
+ * Map layers corresponding to different areas of Subnautica
+ * Each layer has its own map image and fog of war
+ * Maps are available in both detailed and blank versions
+ */
+enum class MapLayer(
+    val displayName: String,
+    val blankMapUrl: String,
+    val detailedMapUrl: String
+) {
+    SURFACE(
+        displayName = "Surface",
+        blankMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-blank.jpg",
+        detailedMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-surface.jpg"
+    ),
+    JELLYSHROOM_CAVES(
+        displayName = "Jellyshroom Caves",
+        blankMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-jellyshroom-cave.jpg",
+        detailedMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-jellyshroom-cave.jpg"
+    ),
+    LOST_RIVER(
+        displayName = "Lost River",
+        blankMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-1-lost-river.jpg",
+        detailedMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-1-lost-river.jpg"
+    ),
+    INACTIVE_LAVA_ZONE(
+        displayName = "Inactive Lava Zone",
+        blankMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-2-inactive-lava-zone.jpg",
+        detailedMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-2-inactive-lava-zone.jpg"
+    ),
+    LAVA_LAKES(
+        displayName = "Lava Lakes",
+        blankMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-3-lava-lakes.jpg",
+        detailedMapUrl = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-3-lava-lakes.jpg"
+    );
+
+    /**
+     * Get the map URL based on the detailed/blank preference
+     */
+    fun getMapUrl(useDetailedMap: Boolean): String {
+        return if (useDetailedMap) detailedMapUrl else blankMapUrl
+    }
+
+    companion object {
+        /**
+         * Determine the appropriate map layer based on biome name
+         * Uses priority: Lava Lakes > Inactive Lava > Lost River > Jellyshroom > Surface
+         */
+        fun fromBiome(biome: String?): MapLayer {
+            if (biome.isNullOrEmpty()) return SURFACE
+
+            val biomeLower = biome.lowercase()
+
+            // Priority 1: Lava Lakes (deepest)
+            if (biomeLower.contains("lavalakes") ||
+                biomeLower.contains("introlava") ||
+                biomeLower.contains("activelava")) {
+                return LAVA_LAKES
+            }
+
+            // Priority 2: Inactive Lava Zone
+            if (biomeLower.contains("ilz") ||
+                biomeLower.contains("inactivelava") ||
+                biomeLower.contains("intactivelava") ||
+                biomeLower.contains("lavacastle") ||
+                biomeLower.contains("lavapit")) {
+                return INACTIVE_LAVA_ZONE
+            }
+
+            // Priority 3: Lost River
+            if (biomeLower.contains("lostriver")) {
+                return LOST_RIVER
+            }
+
+            // Priority 4: Jellyshroom Caves
+            if (biomeLower.contains("jellyshroom")) {
+                return JELLYSHROOM_CAVES
+            }
+
+            // Default: Surface
+            return SURFACE
+        }
+    }
+}

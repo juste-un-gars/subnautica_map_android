@@ -29,8 +29,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.music.music.subnauticamap.data.repository.CustomMarkersRepository
 import com.music.music.subnauticamap.data.repository.FogOfWarRepository
 import com.music.music.subnauticamap.navigation.NavRoutes
+import com.music.music.subnauticamap.ui.about.AboutScreen
 import com.music.music.subnauticamap.ui.connection.ConnectionScreen
 import com.music.music.subnauticamap.ui.connection.ConnectionViewModel
 import com.music.music.subnauticamap.ui.map.MapScreen
@@ -108,8 +110,9 @@ fun SubnauticaMapApp() {
     // Shared ConnectionViewModel to pass repository to MapViewModel
     val connectionViewModel: ConnectionViewModel = viewModel()
 
-    // Fog of war repository
+    // Repositories
     val fogOfWarRepository = remember { FogOfWarRepository(context) }
+    val customMarkersRepository = remember { CustomMarkersRepository(context) }
 
     // Double back press to exit
     var lastBackPressTime by remember { mutableLongStateOf(0L) }
@@ -142,6 +145,17 @@ fun SubnauticaMapApp() {
                     navController.navigate(NavRoutes.MAP) {
                         popUpTo(NavRoutes.CONNECTION) { inclusive = false }
                     }
+                },
+                onAbout = {
+                    navController.navigate(NavRoutes.ABOUT)
+                }
+            )
+        }
+
+        composable(NavRoutes.ABOUT) {
+            AboutScreen(
+                onBack = {
+                    navController.popBackStack()
                 }
             )
         }
@@ -151,15 +165,21 @@ fun SubnauticaMapApp() {
             val mapViewModel: MapViewModel = viewModel(
                 factory = MapViewModelFactory(
                     connectionViewModel.gameStateRepository,
-                    fogOfWarRepository
+                    fogOfWarRepository,
+                    customMarkersRepository
                 )
             )
 
             MapScreen(
                 viewModel = mapViewModel,
                 keepScreenOn = connectionState.keepScreenOn,
+                fogOfWarRepository = fogOfWarRepository,
+                customMarkersRepository = customMarkersRepository,
                 onBack = {
                     navController.popBackStack()
+                },
+                onAbout = {
+                    navController.navigate(NavRoutes.ABOUT)
                 }
             )
         }

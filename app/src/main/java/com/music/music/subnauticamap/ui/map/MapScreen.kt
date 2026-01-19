@@ -1,13 +1,17 @@
 /**
  * @file MapScreen.kt
- * @description Map screen UI with interactive map, markers, and fog of war
- * @session SESSION_003
+ * @description Map screen UI with interactive map, markers, and multi-layer fog of war
+ * @session SESSION_005
  * @created 2026-01-19
  */
 package com.music.music.subnauticamap.ui.map
 
 import android.view.WindowManager
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,7 +20,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+import com.music.music.subnauticamap.data.repository.BackupRepository
+import com.music.music.subnauticamap.data.repository.CustomMarkersRepository
+import com.music.music.subnauticamap.data.repository.FogOfWarRepository
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -27,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.music.music.subnauticamap.R
+import com.music.music.subnauticamap.data.api.MapLayer
 import com.music.music.subnauticamap.data.api.PlayerInfo
 import com.music.music.subnauticamap.data.api.TimeInfo
 import com.music.music.subnauticamap.data.repository.ExplorationStats
@@ -35,20 +46,85 @@ import com.music.music.subnauticamap.ui.map.components.MapState
 import com.music.music.subnauticamap.ui.map.components.rememberMapState
 import com.music.music.subnauticamap.ui.theme.SubnauticaColors
 
-private const val MAP_URL = "https://rocketsoup.net/blogassets/subnautica/2024-07-16/map-blank.jpg"
+// World dimensions
+private const val WORLD_SIZE = 4096f
+private const val WORLD_HALF = 2048f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreen(
     viewModel: MapViewModel,
     keepScreenOn: Boolean,
-    onBack: () -> Unit
+    fogOfWarRepository: FogOfWarRepository,
+    customMarkersRepository: CustomMarkersRepository,
+    onBack: () -> Unit,
+    onAbout: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val view = LocalView.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val mapState = rememberMapState()
     var showInfoPanel by remember { mutableStateOf(true) }
     var showFogMenu by remember { mutableStateOf(false) }
+    var showVisibilityMenu by remember { mutableStateOf(false) }
+    var showMapMenu by remember { mutableStateOf(false) }
+    var showSettingsMenu by remember { mutableStateOf(false) }
+    var showAddMarkerDialog by remember { mutableStateOf(false) }
+    var showResetFogConfirmDialog by remember { mutableStateOf(false) }
+    var newMarkerName by remember { mutableStateOf("") }
+    var newMarkerColor by remember { mutableIntStateOf(0) }
+
+    // Follow player mode - enabled by default
+    var isFollowingPlayer by remember { mutableStateOf(true) }
+    var hasInitializedPosition by remember { mutableStateOf(false) }
+
+    // Backup repository using the shared repositories
+    val backupRepository = remember(fogOfWarRepository, customMarkersRepository) {
+        BackupRepository(context, fogOfWarRepository, customMarkersRepository)
+    }
+    var isExporting by remember { mutableStateOf(false) }
+    var isImporting by remember { mutableStateOf(false) }
+
+    // File picker for export
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                isExporting = true
+                val success = backupRepository.exportBackup(uri)
+                isExporting = false
+                Toast.makeText(
+                    context,
+                    if (success) "Backup exported successfully" else "Export failed",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    // File picker for import
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                isImporting = true
+                val success = backupRepository.importBackup(uri)
+                isImporting = false
+                if (success) {
+                    // Reload all data in ViewModel after successful import
+                    viewModel.reloadData()
+                }
+                Toast.makeText(
+                    context,
+                    if (success) "Backup restored successfully" else "Import failed",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
 
     // Keep screen on management
     DisposableEffect(keepScreenOn) {
@@ -75,9 +151,27 @@ fun MapScreen(
         }
     }
 
-    // Center on player when trigger changes
+    // Center on player when trigger changes (re-enable follow mode at 5x)
     LaunchedEffect(uiState.centerOnPlayerTrigger) {
         if (uiState.centerOnPlayerTrigger > 0 && uiState.player != null) {
+            mapState.scale = 5f
+            centerMapOnPlayer(mapState, uiState.player!!)
+            isFollowingPlayer = true
+        }
+    }
+
+    // Initialize position at 5x on first data received
+    LaunchedEffect(uiState.player, hasInitializedPosition) {
+        if (uiState.player != null && !hasInitializedPosition) {
+            mapState.scale = 5f
+            centerMapOnPlayer(mapState, uiState.player!!)
+            hasInitializedPosition = true
+        }
+    }
+
+    // Follow player mode - update map position when player moves
+    LaunchedEffect(uiState.player, isFollowingPlayer) {
+        if (isFollowingPlayer && uiState.player != null) {
             centerMapOnPlayer(mapState, uiState.player!!)
         }
     }
@@ -85,21 +179,239 @@ fun MapScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Subnautica Map") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
-                },
+                title = { },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = SubnauticaColors.OceanDeep.copy(alpha = 0.9f),
                     titleContentColor = Color.White,
                     navigationIconContentColor = Color.White
                 ),
                 actions = {
+                    // Visibility toggle (eye button)
+                    Box {
+                        val visibility = uiState.visibility
+                        val allVisible = visibility.showPlayer && visibility.showBeacons && visibility.showVehicles
+
+                        IconButton(onClick = { showVisibilityMenu = true }) {
+                            Icon(
+                                if (allVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = "Toggle visibility",
+                                tint = if (allVisible) SubnauticaColors.BioluminescentBlue else Color.White.copy(alpha = 0.5f)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showVisibilityMenu,
+                            onDismissRequest = { showVisibilityMenu = false }
+                        ) {
+                            // Player visibility
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.Person,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = if (visibility.showPlayer) SubnauticaColors.BioluminescentBlue else Color.Gray
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Player")
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Checkbox(
+                                            checked = visibility.showPlayer,
+                                            onCheckedChange = null,
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = SubnauticaColors.BioluminescentBlue
+                                            )
+                                        )
+                                    }
+                                },
+                                onClick = { viewModel.togglePlayerVisibility() }
+                            )
+                            // Beacons visibility
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.LocationOn,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = if (visibility.showBeacons) SubnauticaColors.CoralOrange else Color.Gray
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Beacons")
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Checkbox(
+                                            checked = visibility.showBeacons,
+                                            onCheckedChange = null,
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = SubnauticaColors.BioluminescentBlue
+                                            )
+                                        )
+                                    }
+                                },
+                                onClick = { viewModel.toggleBeaconsVisibility() }
+                            )
+                            // Vehicles visibility
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.DirectionsBoat,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = if (visibility.showVehicles) SubnauticaColors.BioluminescentGreen else Color.Gray
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Vehicles")
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Checkbox(
+                                            checked = visibility.showVehicles,
+                                            onCheckedChange = null,
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = SubnauticaColors.BioluminescentBlue
+                                            )
+                                        )
+                                    }
+                                },
+                                onClick = { viewModel.toggleVehiclesVisibility() }
+                            )
+                            // Custom markers visibility
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.PushPin,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = if (visibility.showCustomMarkers) SubnauticaColors.CoralOrange else Color.Gray
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("My Markers")
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Checkbox(
+                                            checked = visibility.showCustomMarkers,
+                                            onCheckedChange = null,
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = SubnauticaColors.BioluminescentBlue
+                                            )
+                                        )
+                                    }
+                                },
+                                onClick = { viewModel.toggleCustomMarkersVisibility() }
+                            )
+                        }
+                    }
+
+                    // Map settings (detailed/blank + layer selector)
+                    Box {
+                        IconButton(onClick = { showMapMenu = true }) {
+                            Icon(
+                                Icons.Default.Layers,
+                                contentDescription = "Map settings",
+                                tint = if (uiState.useDetailedMap || uiState.layerOverride != null)
+                                    SubnauticaColors.BioluminescentGreen else Color.White
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showMapMenu,
+                            onDismissRequest = { showMapMenu = false }
+                        ) {
+                            // Detailed map toggle
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            if (uiState.useDetailedMap) Icons.Default.Image else Icons.Default.GridOn,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = if (uiState.useDetailedMap) SubnauticaColors.BioluminescentGreen else Color.Gray
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Detailed Map")
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Checkbox(
+                                            checked = uiState.useDetailedMap,
+                                            onCheckedChange = null,
+                                            colors = CheckboxDefaults.colors(
+                                                checkedColor = SubnauticaColors.BioluminescentGreen
+                                            )
+                                        )
+                                    }
+                                },
+                                onClick = { viewModel.toggleDetailedMap() }
+                            )
+
+                            HorizontalDivider()
+
+                            // Layer selector header
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.Map,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = SubnauticaColors.BioluminescentBlue
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Map Layer", fontWeight = FontWeight.Bold)
+                                    }
+                                },
+                                onClick = { },
+                                enabled = false
+                            )
+
+                            // Auto-detect option
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Spacer(modifier = Modifier.width(28.dp))
+                                        Text("Auto (from biome)")
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        if (uiState.layerOverride == null) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp),
+                                                tint = SubnauticaColors.BioluminescentBlue
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.setLayerOverride(null)
+                                    showMapMenu = false
+                                }
+                            )
+
+                            // Each layer option
+                            MapLayer.entries.forEach { layer ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Spacer(modifier = Modifier.width(28.dp))
+                                            Text(layer.displayName)
+                                            Spacer(modifier = Modifier.weight(1f))
+                                            if (uiState.layerOverride == layer) {
+                                                Icon(
+                                                    Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(20.dp),
+                                                    tint = SubnauticaColors.BioluminescentBlue
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        viewModel.setLayerOverride(layer)
+                                        showMapMenu = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
                     // Fog of war toggle
                     Box {
                         IconButton(onClick = { showFogMenu = true }) {
@@ -137,15 +449,16 @@ fun MapScreen(
                                         Icon(
                                             Icons.Default.Refresh,
                                             contentDescription = null,
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(20.dp),
+                                            tint = SubnauticaColors.WarningRed
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Reset Exploration")
+                                        Text("Reset Exploration", color = SubnauticaColors.WarningRed)
                                     }
                                 },
                                 onClick = {
-                                    viewModel.resetFogOfWar()
                                     showFogMenu = false
+                                    showResetFogConfirmDialog = true
                                 }
                             )
                         }
@@ -160,6 +473,102 @@ fun MapScreen(
                         )
                     }
 
+                    // Settings menu (gear icon)
+                    Box {
+                        IconButton(onClick = { showSettingsMenu = true }) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = Color.White
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showSettingsMenu,
+                            onDismissRequest = { showSettingsMenu = false }
+                        ) {
+                            // About
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.Info,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                            tint = SubnauticaColors.BioluminescentBlue
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("About")
+                                    }
+                                },
+                                onClick = {
+                                    showSettingsMenu = false
+                                    onAbout()
+                                }
+                            )
+
+                            HorizontalDivider()
+
+                            // Export backup
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (isExporting) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp,
+                                                color = SubnauticaColors.BioluminescentGreen
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Default.Upload,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp),
+                                                tint = SubnauticaColors.BioluminescentGreen
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Export Backup")
+                                    }
+                                },
+                                onClick = {
+                                    showSettingsMenu = false
+                                    exportLauncher.launch(backupRepository.getBackupFileName())
+                                },
+                                enabled = !isExporting && !isImporting
+                            )
+
+                            // Import backup
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (isImporting) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp,
+                                                color = SubnauticaColors.CoralOrange
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Default.Download,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp),
+                                                tint = SubnauticaColors.CoralOrange
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Restore Backup")
+                                    }
+                                },
+                                onClick = {
+                                    showSettingsMenu = false
+                                    importLauncher.launch(arrayOf("application/json"))
+                                },
+                                enabled = !isExporting && !isImporting
+                            )
+                        }
+                    }
+
                     // Connection status indicator
                     ConnectionStatusIndicator(uiState.connectionStatus)
                 }
@@ -171,18 +580,31 @@ fun MapScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Interactive Map
+            // Interactive Map - uses current layer's map URL and explored chunks
             InteractiveMapView(
-                mapUrl = MAP_URL,
+                mapUrl = uiState.currentMapUrl,
                 player = uiState.player,
                 beacons = uiState.beacons,
                 vehicles = uiState.vehicles,
+                customMarkers = uiState.currentLayerCustomMarkers,
                 mapState = mapState,
-                exploredChunks = uiState.exploredChunks,
+                exploredChunks = uiState.currentExploredChunks,
                 fogOfWarEnabled = uiState.fogOfWarEnabled,
                 hasReceivedData = uiState.hasReceivedData,
+                isFollowingPlayer = isFollowingPlayer,
                 onCenterOnPlayer = { viewModel.centerOnPlayer() },
-                modifier = Modifier.fillMaxSize()
+                onUserInteraction = { isFollowingPlayer = false },
+                onAddMarker = {
+                    newMarkerName = ""
+                    newMarkerColor = 0
+                    showAddMarkerDialog = true
+                },
+                onCustomMarkerDelete = { viewModel.deleteCustomMarker(it) },
+                modifier = Modifier.fillMaxSize(),
+                showPlayer = uiState.visibility.showPlayer,
+                showBeacons = uiState.visibility.showBeacons,
+                showVehicles = uiState.visibility.showVehicles,
+                showCustomMarkers = uiState.visibility.showCustomMarkers
             )
 
             // Info overlay panel (top-left)
@@ -191,6 +613,7 @@ fun MapScreen(
                     player = uiState.player,
                     time = uiState.time,
                     connectionStatus = uiState.connectionStatus,
+                    currentLayer = uiState.currentLayer,
                     explorationStats = uiState.explorationStats,
                     fogOfWarEnabled = uiState.fogOfWarEnabled,
                     modifier = Modifier
@@ -200,19 +623,184 @@ fun MapScreen(
             }
         }
     }
+
+    // Add marker dialog
+    if (showAddMarkerDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddMarkerDialog = false },
+            title = {
+                Text(
+                    "Save Current Position",
+                    color = Color.White
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        "Save your current position as a marker on the map.",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = newMarkerName,
+                        onValueChange = { newMarkerName = it },
+                        label = { Text("Marker name") },
+                        placeholder = { Text("e.g., Resource deposit") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = SubnauticaColors.BioluminescentBlue,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.5f),
+                            focusedLabelColor = SubnauticaColors.BioluminescentBlue,
+                            unfocusedLabelColor = Color.White.copy(alpha = 0.7f),
+                            cursorColor = SubnauticaColors.BioluminescentBlue
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "Color:",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        repeat(8) { colorIndex ->
+                            val isSelected = newMarkerColor == colorIndex
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(SubnauticaColors.getBeaconColor(colorIndex))
+                                    .then(
+                                        if (isSelected) Modifier.background(
+                                            Color.White.copy(alpha = 0.3f),
+                                            CircleShape
+                                        ) else Modifier
+                                    )
+                                    .clickable { newMarkerColor = colorIndex },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    uiState.player?.let { player ->
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "Position: X=%.0f, Z=%.0f\nDepth: %.1f m".format(
+                                player.position.xFloat,
+                                player.position.zFloat,
+                                player.depthFloat
+                            ),
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (newMarkerName.isNotBlank()) {
+                            viewModel.saveCurrentPositionAsMarker(newMarkerName.trim(), newMarkerColor)
+                            showAddMarkerDialog = false
+                        }
+                    },
+                    enabled = newMarkerName.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SubnauticaColors.BioluminescentBlue
+                    )
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddMarkerDialog = false }) {
+                    Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                }
+            },
+            containerColor = SubnauticaColors.OceanDeep,
+            titleContentColor = Color.White,
+            textContentColor = Color.White
+        )
+    }
+
+    // Reset fog of war confirmation dialog
+    if (showResetFogConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetFogConfirmDialog = false },
+            icon = {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = SubnauticaColors.WarningRed,
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    "Reset Exploration?",
+                    color = Color.White
+                )
+            },
+            text = {
+                Text(
+                    "This will erase all your exploration progress for ALL map layers. This action cannot be undone.",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.resetFogOfWar()
+                        showResetFogConfirmDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SubnauticaColors.WarningRed
+                    )
+                ) {
+                    Text("Reset")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetFogConfirmDialog = false }) {
+                    Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                }
+            },
+            containerColor = SubnauticaColors.OceanDeep,
+            titleContentColor = Color.White,
+            textContentColor = Color.White
+        )
+    }
 }
 
 /**
- * Center the map on player position
+ * Center the map on player position (keeps current scale)
+ * Uses the actual map size from mapState for accurate centering
  */
 private fun centerMapOnPlayer(mapState: MapState, player: PlayerInfo) {
-    mapState.scale = 2f
+    // Skip if container not measured yet
+    if (mapState.effectiveMapSize <= 0f) return
 
-    val normalizedX = (player.position.xFloat + 2000f) / 4000f
-    val normalizedZ = (2000f - player.position.zFloat) / 4000f
+    val normalizedX = (player.position.xFloat + WORLD_HALF) / WORLD_SIZE
+    val normalizedZ = (WORLD_HALF - player.position.zFloat) / WORLD_SIZE
 
-    mapState.offsetX = (0.5f - normalizedX) * 1000f * mapState.scale
-    mapState.offsetY = (0.5f - normalizedZ) * 1000f * mapState.scale
+    // Use the actual effective map size for accurate centering
+    mapState.offsetX = (0.5f - normalizedX) * mapState.effectiveMapSize * mapState.scale
+    mapState.offsetY = (0.5f - normalizedZ) * mapState.effectiveMapSize * mapState.scale
 }
 
 @Composable
@@ -248,6 +836,7 @@ private fun InfoOverlayPanel(
     player: PlayerInfo?,
     time: TimeInfo?,
     connectionStatus: MapConnectionStatus,
+    currentLayer: MapLayer,
     explorationStats: ExplorationStats?,
     fogOfWarEnabled: Boolean,
     modifier: Modifier = Modifier
@@ -319,12 +908,19 @@ private fun InfoOverlayPanel(
                     )
                 )
 
-                // Exploration progress
-                if (fogOfWarEnabled && explorationStats != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    HorizontalDivider(color = Color.White.copy(alpha = 0.2f))
-                    Spacer(modifier = Modifier.height(4.dp))
+                // Exploration progress and layer info
+                Spacer(modifier = Modifier.height(4.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(4.dp))
 
+                // Show current map layer
+                InfoRow(
+                    label = "Map",
+                    value = currentLayer.displayName,
+                    valueColor = if (fogOfWarEnabled) SubnauticaColors.BioluminescentBlue else SubnauticaColors.BioluminescentGreen
+                )
+
+                if (fogOfWarEnabled && explorationStats != null) {
                     InfoRow(
                         label = "Explored",
                         value = "%.1f%%".format(explorationStats.percentageExplored),

@@ -11,4 +11,5 @@ package com.music.music.subnauticamap.navigation
 object NavRoutes {
     const val CONNECTION = "connection"
     const val MAP = "map"
+    const val ABOUT = "about"
 }

@@ -47,6 +47,7 @@ import coil.request.ImageRequest
 import com.music.music.subnauticamap.data.api.BeaconInfo
 import com.music.music.subnauticamap.data.api.PlayerInfo
 import com.music.music.subnauticamap.data.api.VehicleInfo
+import com.music.music.subnauticamap.data.repository.CustomMarker
 import com.music.music.subnauticamap.ui.theme.SubnauticaColors
 import kotlin.math.sqrt
 
@@ -57,6 +58,7 @@ sealed class SelectedMarker {
     data class Player(val info: PlayerInfo) : SelectedMarker()
     data class Beacon(val info: BeaconInfo) : SelectedMarker()
     data class Vehicle(val info: VehicleInfo) : SelectedMarker()
+    data class Custom(val marker: CustomMarker) : SelectedMarker()
 }
 
 /**
@@ -67,6 +69,14 @@ class MapState {
     var scale by mutableFloatStateOf(1f)
     var offsetX by mutableFloatStateOf(0f)
     var offsetY by mutableFloatStateOf(0f)
+
+    // Container dimensions (updated by InteractiveMapView)
+    var containerWidth by mutableFloatStateOf(0f)
+    var containerHeight by mutableFloatStateOf(0f)
+
+    // Effective map size (square, fits in container)
+    val effectiveMapSize: Float
+        get() = minOf(containerWidth, containerHeight)
 
     companion object {
         const val MIN_SCALE = 0.5f
@@ -91,6 +101,10 @@ class MapState {
 @Composable
 fun rememberMapState(): MapState = remember { MapState() }
 
+// World dimensions: 4096m x 4096m (-2048 to +2048)
+private const val WORLD_SIZE = 4096f
+private const val WORLD_HALF = 2048f
+
 /**
  * Convert world coordinates to map pixel position
  */
@@ -100,23 +114,24 @@ fun worldToMapPosition(
     mapWidth: Float,
     mapHeight: Float
 ): Offset {
-    val mapX = ((worldX + 2000f) / 4000f) * mapWidth
-    val mapY = ((2000f - worldZ) / 4000f) * mapHeight
+    val mapX = ((worldX + WORLD_HALF) / WORLD_SIZE) * mapWidth
+    val mapY = ((WORLD_HALF - worldZ) / WORLD_SIZE) * mapHeight
     return Offset(mapX, mapY)
 }
 
 /**
- * Convert world coordinates to map pixel position with vertical offset
- * Used when the square map is centered in a taller container
+ * Convert world coordinates to map pixel position with offsets
+ * Used when the square map is centered in a container (portrait or landscape)
  */
 fun worldToMapPositionWithOffset(
     worldX: Float,
     worldZ: Float,
     mapSize: Float,
+    offsetX: Float,
     offsetY: Float
 ): Offset {
-    val mapX = ((worldX + 2000f) / 4000f) * mapSize
-    val mapY = ((2000f - worldZ) / 4000f) * mapSize + offsetY
+    val mapX = ((worldX + WORLD_HALF) / WORLD_SIZE) * mapSize + offsetX
+    val mapY = ((WORLD_HALF - worldZ) / WORLD_SIZE) * mapSize + offsetY
     return Offset(mapX, mapY)
 }
 
@@ -134,8 +149,8 @@ fun screenToWorldPosition(
     val mapY = (screenY - containerSize.height / 2f - mapState.offsetY) / mapState.scale + containerSize.height / 2f
 
     // Convert to world coordinates
-    val worldX = (mapX / containerSize.width) * 4000f - 2000f
-    val worldZ = 2000f - (mapY / containerSize.height) * 4000f
+    val worldX = (mapX / containerSize.width) * WORLD_SIZE - WORLD_HALF
+    val worldZ = WORLD_HALF - (mapY / containerSize.height) * WORLD_SIZE
 
     return Pair(worldX, worldZ)
 }
@@ -149,31 +164,51 @@ fun InteractiveMapView(
     player: PlayerInfo?,
     beacons: List<BeaconInfo>,
     vehicles: List<VehicleInfo>,
+    customMarkers: List<CustomMarker>,
     mapState: MapState,
     exploredChunks: Set<Long>,
     fogOfWarEnabled: Boolean,
     hasReceivedData: Boolean,
+    isFollowingPlayer: Boolean = false,
     onCenterOnPlayer: () -> Unit,
-    modifier: Modifier = Modifier
+    onUserInteraction: () -> Unit = {},
+    onAddMarker: () -> Unit = {},
+    onCustomMarkerDelete: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+    showPlayer: Boolean = true,
+    showBeacons: Boolean = true,
+    showVehicles: Boolean = true,
+    showCustomMarkers: Boolean = true
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var isImageLoaded by remember { mutableStateOf(false) }
     var selectedMarker by remember { mutableStateOf<SelectedMarker?>(null) }
 
-    // Calculate the effective map size (square, based on container width)
-    // The map image is square (4000x4000 world units), so we use width as the base
-    val effectiveMapSize = containerSize.width.toFloat()
-    // Vertical offset to center the square map in the container
-    val mapOffsetY = (containerSize.height - containerSize.width) / 2f
+    // Calculate the effective map size (square, fits in container)
+    // Use the smaller dimension so the map always fits
+    val effectiveMapSize = minOf(containerSize.width, containerSize.height).toFloat()
+    // Offsets to center the square map in the container
+    val mapOffsetX = (containerSize.width - effectiveMapSize) / 2f
+    val mapOffsetY = (containerSize.height - effectiveMapSize) / 2f
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .clipToBounds()
             .background(Color.Black)
-            .onSizeChanged { containerSize = it }
-            .pointerInput(Unit) {
+            .onSizeChanged {
+                containerSize = it
+                // Update mapState with container dimensions for centering calculations
+                mapState.containerWidth = it.width.toFloat()
+                mapState.containerHeight = it.height.toFloat()
+            }
+            .pointerInput(onUserInteraction) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
+                    // Notify that user is manually interacting (disable follow mode)
+                    if (pan.x != 0f || pan.y != 0f || zoom != 1f) {
+                        onUserInteraction()
+                    }
+
                     val newScale = (mapState.scale * zoom).coerceIn(
                         MapState.MIN_SCALE,
                         MapState.MAX_SCALE
@@ -188,7 +223,7 @@ fun InteractiveMapView(
                     mapState.offsetY += pan.y
                 }
             }
-            .pointerInput(player, beacons, vehicles, mapState.scale, mapState.offsetX, mapState.offsetY, effectiveMapSize, mapOffsetY) {
+            .pointerInput(player, beacons, vehicles, customMarkers, mapState.scale, mapState.offsetX, mapState.offsetY, effectiveMapSize, mapOffsetX, mapOffsetY, showPlayer, showBeacons, showVehicles, showCustomMarkers) {
                 detectTapGestures { tapOffset ->
                     // Find tapped marker
                     val tappedMarker = findTappedMarker(
@@ -198,8 +233,14 @@ fun InteractiveMapView(
                         player = player,
                         beacons = beacons,
                         vehicles = vehicles,
+                        customMarkers = customMarkers,
                         effectiveMapSize = effectiveMapSize,
-                        mapOffsetY = mapOffsetY
+                        mapOffsetX = mapOffsetX,
+                        mapOffsetY = mapOffsetY,
+                        showPlayer = showPlayer,
+                        showBeacons = showBeacons,
+                        showVehicles = showVehicles,
+                        showCustomMarkers = showCustomMarkers
                     )
                     selectedMarker = tappedMarker
                 }
@@ -232,6 +273,17 @@ fun InteractiveMapView(
 
             // Fog of war overlay
             if (isImageLoaded && fogOfWarEnabled && containerSize.width > 0) {
+                // Calculate player position for real-time visibility circle
+                val playerMapPosition = player?.let {
+                    worldToMapPositionWithOffset(
+                        it.position.xFloat,
+                        it.position.zFloat,
+                        effectiveMapSize,
+                        mapOffsetX,
+                        mapOffsetY
+                    )
+                }
+
                 Canvas(
                     modifier = Modifier
                         .fillMaxSize()
@@ -244,7 +296,7 @@ fun InteractiveMapView(
                             compositingStrategy = CompositingStrategy.Offscreen
                         }
                 ) {
-                    drawFogOfWarCircles(exploredChunks, effectiveMapSize, mapOffsetY)
+                    drawFogOfWarCircles(exploredChunks, effectiveMapSize, mapOffsetX, mapOffsetY, playerMapPosition)
                 }
             }
 
@@ -261,39 +313,63 @@ fun InteractiveMapView(
                         }
                 ) {
                     // Draw vehicles
-                    vehicles.forEach { vehicle ->
-                        val pos = worldToMapPositionWithOffset(
-                            vehicle.position.xFloat,
-                            vehicle.position.zFloat,
-                            effectiveMapSize,
-                            mapOffsetY
-                        )
-                        val isSelected = (selectedMarker as? SelectedMarker.Vehicle)?.info?.id == vehicle.id
-                        drawVehicleMarker(pos, vehicle.type, mapState.scale, isSelected)
+                    if (showVehicles) {
+                        vehicles.forEach { vehicle ->
+                            val pos = worldToMapPositionWithOffset(
+                                vehicle.position.xFloat,
+                                vehicle.position.zFloat,
+                                effectiveMapSize,
+                                mapOffsetX,
+                                mapOffsetY
+                            )
+                            val isSelected = (selectedMarker as? SelectedMarker.Vehicle)?.info?.id == vehicle.id
+                            drawVehicleMarker(pos, vehicle.type, mapState.scale, isSelected)
+                        }
                     }
 
                     // Draw beacons
-                    beacons.filter { it.visible }.forEach { beacon ->
-                        val pos = worldToMapPositionWithOffset(
-                            beacon.position.xFloat,
-                            beacon.position.zFloat,
-                            effectiveMapSize,
-                            mapOffsetY
-                        )
-                        val isSelected = (selectedMarker as? SelectedMarker.Beacon)?.info?.id == beacon.id
-                        drawBeaconMarker(pos, beacon.colorIndex, mapState.scale, isSelected)
+                    if (showBeacons) {
+                        beacons.filter { it.visible }.forEach { beacon ->
+                            val pos = worldToMapPositionWithOffset(
+                                beacon.position.xFloat,
+                                beacon.position.zFloat,
+                                effectiveMapSize,
+                                mapOffsetX,
+                                mapOffsetY
+                            )
+                            val isSelected = (selectedMarker as? SelectedMarker.Beacon)?.info?.id == beacon.id
+                            drawBeaconMarker(pos, beacon.colorIndex, mapState.scale, isSelected)
+                        }
+                    }
+
+                    // Draw custom markers
+                    if (showCustomMarkers) {
+                        customMarkers.forEach { marker ->
+                            val pos = worldToMapPositionWithOffset(
+                                marker.x,
+                                marker.z,
+                                effectiveMapSize,
+                                mapOffsetX,
+                                mapOffsetY
+                            )
+                            val isSelected = (selectedMarker as? SelectedMarker.Custom)?.marker?.id == marker.id
+                            drawCustomMarker(pos, marker.colorIndex, mapState.scale, isSelected)
+                        }
                     }
 
                     // Draw player
-                    player?.let {
-                        val playerPos = worldToMapPositionWithOffset(
-                            it.position.xFloat,
-                            it.position.zFloat,
-                            effectiveMapSize,
-                            mapOffsetY
-                        )
-                        val isSelected = selectedMarker is SelectedMarker.Player
-                        drawPlayerMarker(playerPos, it.heading, mapState.scale, isSelected)
+                    if (showPlayer) {
+                        player?.let {
+                            val playerPos = worldToMapPositionWithOffset(
+                                it.position.xFloat,
+                                it.position.zFloat,
+                                effectiveMapSize,
+                                mapOffsetX,
+                                mapOffsetY
+                            )
+                            val isSelected = selectedMarker is SelectedMarker.Player
+                            drawPlayerMarker(playerPos, it.heading, mapState.scale, isSelected)
+                        }
                     }
                 }
             }
@@ -331,27 +407,46 @@ fun InteractiveMapView(
             selectedMarker?.let { marker ->
                 MarkerInfoCard(
                     marker = marker,
-                    onDismiss = { selectedMarker = null }
+                    onDismiss = { selectedMarker = null },
+                    onDeleteCustomMarker = { markerId ->
+                        onCustomMarkerDelete(markerId)
+                    }
                 )
             }
         }
 
-        // Zoom controls
+        // Zoom controls and actions
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Add marker button (only when player is available)
+            if (player != null) {
+                FloatingActionButton(
+                    onClick = onAddMarker,
+                    modifier = Modifier.size(48.dp),
+                    containerColor = SubnauticaColors.CoralOrange,
+                    contentColor = Color.White
+                ) {
+                    Icon(
+                        Icons.Default.AddLocation,
+                        contentDescription = "Save position",
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+
             FloatingActionButton(
                 onClick = onCenterOnPlayer,
                 modifier = Modifier.size(48.dp),
-                containerColor = SubnauticaColors.BioluminescentBlue,
+                containerColor = if (isFollowingPlayer) SubnauticaColors.BioluminescentGreen else SubnauticaColors.BioluminescentBlue,
                 contentColor = Color.White
             ) {
                 Icon(
-                    Icons.Default.MyLocation,
-                    contentDescription = "Center on player",
+                    if (isFollowingPlayer) Icons.Default.GpsFixed else Icons.Default.MyLocation,
+                    contentDescription = if (isFollowingPlayer) "Following player" else "Center on player",
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -413,8 +508,14 @@ private fun findTappedMarker(
     player: PlayerInfo?,
     beacons: List<BeaconInfo>,
     vehicles: List<VehicleInfo>,
+    customMarkers: List<CustomMarker>,
     effectiveMapSize: Float,
-    mapOffsetY: Float
+    mapOffsetX: Float,
+    mapOffsetY: Float,
+    showPlayer: Boolean,
+    showBeacons: Boolean,
+    showVehicles: Boolean,
+    showCustomMarkers: Boolean
 ): SelectedMarker? {
     val tapRadius = 40f // Touch target radius in pixels
 
@@ -423,29 +524,46 @@ private fun findTappedMarker(
     val mapTapY = (tapOffset.y - containerSize.height / 2f - mapState.offsetY) / mapState.scale + containerSize.height / 2f
 
     // Check player first (highest priority)
-    player?.let {
-        val pos = worldToMapPositionWithOffset(it.position.xFloat, it.position.zFloat, effectiveMapSize, mapOffsetY)
-        val distance = sqrt((mapTapX - pos.x) * (mapTapX - pos.x) + (mapTapY - pos.y) * (mapTapY - pos.y))
-        if (distance < tapRadius / mapState.scale) {
-            return SelectedMarker.Player(it)
+    if (showPlayer) {
+        player?.let {
+            val pos = worldToMapPositionWithOffset(it.position.xFloat, it.position.zFloat, effectiveMapSize, mapOffsetX, mapOffsetY)
+            val distance = sqrt((mapTapX - pos.x) * (mapTapX - pos.x) + (mapTapY - pos.y) * (mapTapY - pos.y))
+            if (distance < tapRadius / mapState.scale) {
+                return SelectedMarker.Player(it)
+            }
         }
     }
 
     // Check beacons
-    beacons.filter { it.visible }.forEach { beacon ->
-        val pos = worldToMapPositionWithOffset(beacon.position.xFloat, beacon.position.zFloat, effectiveMapSize, mapOffsetY)
-        val distance = sqrt((mapTapX - pos.x) * (mapTapX - pos.x) + (mapTapY - pos.y) * (mapTapY - pos.y))
-        if (distance < tapRadius / mapState.scale) {
-            return SelectedMarker.Beacon(beacon)
+    if (showBeacons) {
+        beacons.filter { it.visible }.forEach { beacon ->
+            val pos = worldToMapPositionWithOffset(beacon.position.xFloat, beacon.position.zFloat, effectiveMapSize, mapOffsetX, mapOffsetY)
+            val distance = sqrt((mapTapX - pos.x) * (mapTapX - pos.x) + (mapTapY - pos.y) * (mapTapY - pos.y))
+            if (distance < tapRadius / mapState.scale) {
+                return SelectedMarker.Beacon(beacon)
+            }
+        }
+    }
+
+    // Check custom markers
+    if (showCustomMarkers) {
+        customMarkers.forEach { marker ->
+            val pos = worldToMapPositionWithOffset(marker.x, marker.z, effectiveMapSize, mapOffsetX, mapOffsetY)
+            val distance = sqrt((mapTapX - pos.x) * (mapTapX - pos.x) + (mapTapY - pos.y) * (mapTapY - pos.y))
+            if (distance < tapRadius / mapState.scale) {
+                return SelectedMarker.Custom(marker)
+            }
         }
     }
 
     // Check vehicles
-    vehicles.forEach { vehicle ->
-        val pos = worldToMapPositionWithOffset(vehicle.position.xFloat, vehicle.position.zFloat, effectiveMapSize, mapOffsetY)
-        val distance = sqrt((mapTapX - pos.x) * (mapTapX - pos.x) + (mapTapY - pos.y) * (mapTapY - pos.y))
-        if (distance < tapRadius / mapState.scale) {
-            return SelectedMarker.Vehicle(vehicle)
+    if (showVehicles) {
+        vehicles.forEach { vehicle ->
+            val pos = worldToMapPositionWithOffset(vehicle.position.xFloat, vehicle.position.zFloat, effectiveMapSize, mapOffsetX, mapOffsetY)
+            val distance = sqrt((mapTapX - pos.x) * (mapTapX - pos.x) + (mapTapY - pos.y) * (mapTapY - pos.y))
+            if (distance < tapRadius / mapState.scale) {
+                return SelectedMarker.Vehicle(vehicle)
+            }
         }
     }
 
@@ -458,7 +576,8 @@ private fun findTappedMarker(
 @Composable
 private fun MarkerInfoCard(
     marker: SelectedMarker,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onDeleteCustomMarker: (String) -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -495,6 +614,11 @@ private fun MarkerInfoCard(
                             SubnauticaColors.getVehicleColor(marker.info.type),
                             marker.info.name.ifEmpty { marker.info.type }
                         )
+                        is SelectedMarker.Custom -> Triple(
+                            Icons.Default.PushPin,
+                            SubnauticaColors.getBeaconColor(marker.marker.colorIndex),
+                            marker.marker.label
+                        )
                     }
 
                     Icon(
@@ -512,16 +636,36 @@ private fun MarkerInfoCard(
                     )
                 }
 
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = Color.White.copy(alpha = 0.7f),
-                        modifier = Modifier.size(20.dp)
-                    )
+                Row {
+                    // Delete button for custom markers
+                    if (marker is SelectedMarker.Custom) {
+                        IconButton(
+                            onClick = {
+                                onDeleteCustomMarker(marker.marker.id)
+                                onDismiss()
+                            },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Delete marker",
+                                tint = SubnauticaColors.WarningRed.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
@@ -556,6 +700,15 @@ private fun MarkerInfoCard(
                         marker.info.position.zFloat
                     ))
                     MarkerDetailRow("Depth", "%.0f m".format(-marker.info.position.yFloat))
+                }
+                is SelectedMarker.Custom -> {
+                    MarkerDetailRow("Type", "Custom Marker")
+                    MarkerDetailRow("Position", "X: %.0f  Z: %.0f".format(
+                        marker.marker.x,
+                        marker.marker.z
+                    ))
+                    MarkerDetailRow("Depth", "%.0f m".format(marker.marker.depth))
+                    MarkerDetailRow("Layer", marker.marker.layer.displayName)
                 }
             }
         }
@@ -592,37 +745,59 @@ private fun formatBiomeName(biome: String): String {
 /**
  * Draw fog of war overlay with circular reveals
  * Uses BlendMode.Clear to cut out circles for explored areas
+ * Also draws a real-time visibility circle around the player
  */
-private fun DrawScope.drawFogOfWarCircles(exploredChunks: Set<Long>, mapSize: Float, offsetY: Float) {
-    val chunkWorldSize = 50f // 50 world units per chunk (50m visibility radius)
-    val chunksPerAxis = (4000f / chunkWorldSize).toInt() // 80 chunks per axis
-    val chunkPixelSize = mapSize / chunksPerAxis
-    // Circle radius = half of chunk size to create 50m diameter circles
-    val circleRadius = chunkPixelSize * 0.7f // Slightly larger for overlap between adjacent chunks
+private fun DrawScope.drawFogOfWarCircles(
+    exploredChunks: Set<Long>,
+    mapSize: Float,
+    offsetX: Float,
+    offsetY: Float,
+    playerPosition: Offset?
+) {
+    // Chunk pixel size for positioning (10m grid)
+    val chunkPixelSize = mapSize / CHUNKS_PER_AXIS
+
+    // Circle radius for explored chunks - 50m visibility radius
+    // Each stored point represents a 50m visibility circle
+    val exploredCircleRadius = (EXPLORED_VISIBILITY_RADIUS / WORLD_SIZE) * mapSize * 0.5f
+
+    // Player visibility radius (50m) for real-time visibility
+    val playerVisibilityRadius = (EXPLORED_VISIBILITY_RADIUS / WORLD_SIZE) * mapSize * 0.5f
 
     // Draw full black overlay covering the map area
     drawRect(
         color = Color.Black,
-        topLeft = Offset(0f, offsetY),
+        topLeft = Offset(offsetX, offsetY),
         size = Size(mapSize, mapSize)
     )
 
     // Cut out circular reveals for explored chunks
     exploredChunks.forEach { chunkKey ->
         val (chunkX, chunkZ) = unpackChunkKey(chunkKey)
-        if (chunkX in 0 until chunksPerAxis && chunkZ in 0 until chunksPerAxis) {
+        if (chunkX in 0 until CHUNKS_PER_AXIS && chunkZ in 0 until CHUNKS_PER_AXIS) {
             // Center of the chunk
-            val centerX = (chunkX + 0.5f) * chunkPixelSize
+            val centerX = (chunkX + 0.5f) * chunkPixelSize + offsetX
             val centerY = (chunkZ + 0.5f) * chunkPixelSize + offsetY
 
-            // Clear a circle to reveal the map underneath
+            // Clear a circle to reveal the map underneath (50m visibility)
             drawCircle(
                 color = Color.Transparent,
-                radius = circleRadius,
+                radius = exploredCircleRadius,
                 center = Offset(centerX, centerY),
                 blendMode = BlendMode.Clear
             )
         }
+    }
+
+    // Draw real-time visibility circle around player
+    // This makes the fog "follow" the player smoothly
+    playerPosition?.let { pos ->
+        drawCircle(
+            color = Color.Transparent,
+            radius = playerVisibilityRadius,
+            center = pos,
+            blendMode = BlendMode.Clear
+        )
     }
 }
 
@@ -642,13 +817,20 @@ fun unpackChunkKey(key: Long): Pair<Int, Int> {
     return Pair(chunkX, chunkZ)
 }
 
+// Chunk size for exploration trail (10m spacing between stored points)
+const val CHUNK_WORLD_SIZE = 10f
+private val CHUNKS_PER_AXIS = (WORLD_SIZE / CHUNK_WORLD_SIZE).toInt() // ~410
+
+// Visibility diameter when rendering explored chunks (100m diameter)
+private const val EXPLORED_VISIBILITY_RADIUS = 100f
+
 /**
  * Convert world position to chunk coordinates
  */
 fun worldToChunk(worldX: Float, worldZ: Float): Pair<Int, Int> {
-    val chunkWorldSize = 50f
-    val chunkX = ((worldX + 2000f) / chunkWorldSize).toInt().coerceIn(0, 79)
-    val chunkZ = ((2000f - worldZ) / chunkWorldSize).toInt().coerceIn(0, 79)
+    val maxChunk = CHUNKS_PER_AXIS - 1 // ~819
+    val chunkX = ((worldX + WORLD_HALF) / CHUNK_WORLD_SIZE).toInt().coerceIn(0, maxChunk)
+    val chunkZ = ((WORLD_HALF - worldZ) / CHUNK_WORLD_SIZE).toInt().coerceIn(0, maxChunk)
     return Pair(chunkX, chunkZ)
 }
 
@@ -775,5 +957,58 @@ private fun DrawScope.drawVehicleMarker(
         radius = size,
         center = position,
         style = Stroke(width = 2f / scale)
+    )
+}
+
+/**
+ * Draw custom marker (pin shape - circle with small triangle at bottom)
+ */
+private fun DrawScope.drawCustomMarker(
+    position: Offset,
+    colorIndex: Int,
+    scale: Float,
+    isSelected: Boolean
+) {
+    val color = SubnauticaColors.getBeaconColor(colorIndex)
+    val size = if (isSelected) 20f / scale else 16f / scale
+
+    // Selection ring
+    if (isSelected) {
+        drawCircle(
+            color = Color.White,
+            radius = size * 2f,
+            center = position,
+            style = Stroke(width = 3f / scale)
+        )
+    }
+
+    // Pin body (circle)
+    drawCircle(
+        color = color,
+        radius = size,
+        center = Offset(position.x, position.y - size * 0.5f)
+    )
+    drawCircle(
+        color = Color.White,
+        radius = size,
+        center = Offset(position.x, position.y - size * 0.5f),
+        style = Stroke(width = 2f / scale)
+    )
+
+    // Pin point (small triangle)
+    val pinPath = Path().apply {
+        moveTo(position.x - size * 0.5f, position.y - size * 0.3f)
+        lineTo(position.x, position.y + size * 0.7f)
+        lineTo(position.x + size * 0.5f, position.y - size * 0.3f)
+        close()
+    }
+    drawPath(pinPath, color, style = Fill)
+    drawPath(pinPath, Color.White, style = Stroke(width = 1.5f / scale))
+
+    // Inner circle (white dot)
+    drawCircle(
+        color = Color.White,
+        radius = size * 0.4f,
+        center = Offset(position.x, position.y - size * 0.5f)
     )
 }

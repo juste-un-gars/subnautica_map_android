@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -30,7 +32,8 @@ import com.music.music.subnauticamap.ui.theme.SubnauticaColors
 @Composable
 fun ConnectionScreen(
     viewModel: ConnectionViewModel = viewModel(),
-    onConnected: () -> Unit
+    onConnected: () -> Unit,
+    onAbout: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
@@ -51,6 +54,20 @@ fun ConnectionScreen(
                 )
             )
     ) {
+        // About button in top-right corner
+        IconButton(
+            onClick = onAbout,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Info,
+                contentDescription = "About",
+                tint = Color.White.copy(alpha = 0.7f)
+            )
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
