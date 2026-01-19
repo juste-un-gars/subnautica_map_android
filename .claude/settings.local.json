@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:rocketsoup.net)",
+      "Bash(git config:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

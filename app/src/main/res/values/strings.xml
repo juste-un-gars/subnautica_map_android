@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Subnautica Map</string>
+
+    <!-- Connection Screen -->
+    <string name="connection_title">Connect to Subnautica</string>
+    <string name="ip_address_label">PC IP Address</string>
+    <string name="ip_address_hint">192.168.1.100</string>
+    <string name="port_label">Port</string>
+    <string name="port_hint">63030</string>
+    <string name="keep_screen_on">Keep screen on</string>
+    <string name="connect_button">Connect</string>
+    <string name="disconnect_button">Disconnect</string>
+    <string name="testing_connection">Testing connection...</string>
+    <string name="connection_success">Connected!</string>
+    <string name="connection_failed">Connection failed</string>
+    <string name="waiting_for_game">Waiting for game...</string>
+
+    <!-- Map Screen -->
+    <string name="player_position">Position</string>
+    <string name="player_depth">Depth</string>
+    <string name="player_biome">Biome</string>
+    <string name="player_heading">Heading</string>
+    <string name="day">Day</string>
+    <string name="night">Night</string>
+    <string name="vehicles">Vehicles</string>
+    <string name="beacons">Beacons</string>
+    <string name="no_data">No data</string>
+    <string name="meters">%1$.1f m</string>
+    <string name="degrees">%1$.0f°</string>
+</resources>

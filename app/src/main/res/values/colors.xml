@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Subnautica-inspired colors -->
+    <color name="ocean_deep">#FF0A1628</color>
+    <color name="ocean_medium">#FF0D2137</color>
+    <color name="ocean_light">#FF1A3A5C</color>
+    <color name="bioluminescent_blue">#FF00D4FF</color>
+    <color name="bioluminescent_green">#FF00FF88</color>
+    <color name="coral_orange">#FFFF6B35</color>
+    <color name="warning_red">#FFFF4444</color>
+    <color name="surface_light">#FF87CEEB</color>
+
+    <!-- Vehicle colors -->
+    <color name="seamoth_yellow">#FFFFCC00</color>
+    <color name="cyclops_gray">#FF888888</color>
+    <color name="prawn_orange">#FFFF8800</color>
+
+    <!-- Beacon colors (matching Subnautica) -->
+    <color name="beacon_0">#FFFF0000</color>
+    <color name="beacon_1">#FFFF8800</color>
+    <color name="beacon_2">#FFFFFF00</color>
+    <color name="beacon_3">#FF00FF00</color>
+    <color name="beacon_4">#FF00FFFF</color>
+    <color name="beacon_5">#FF0088FF</color>
+    <color name="beacon_6">#FFFF00FF</color>
+    <color name="beacon_7">#FFFFFFFF</color>
+</resources>
