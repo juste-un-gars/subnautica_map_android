@@ -180,6 +180,7 @@ fun MapScreen(
                 mapState = mapState,
                 exploredChunks = uiState.exploredChunks,
                 fogOfWarEnabled = uiState.fogOfWarEnabled,
+                hasReceivedData = uiState.hasReceivedData,
                 onCenterOnPlayer = { viewModel.centerOnPlayer() },
                 modifier = Modifier.fillMaxSize()
             )

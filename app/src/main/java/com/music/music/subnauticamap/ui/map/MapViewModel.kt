@@ -49,7 +49,9 @@ data class MapUiState(
     // Fog of war state
     val fogOfWarEnabled: Boolean = true,
     val exploredChunks: Set<Long> = emptySet(),
-    val explorationStats: ExplorationStats? = null
+    val explorationStats: ExplorationStats? = null,
+    // Flag to track if we received at least one successful data update
+    val hasReceivedData: Boolean = false
 )
 
 /**
@@ -177,7 +179,8 @@ class MapViewModel(
                     vehicles = state.vehicles,
                     lastUpdateTimestamp = state.timestamp,
                     exploredChunks = newExploredChunks,
-                    explorationStats = stats
+                    explorationStats = stats,
+                    hasReceivedData = true
                 )
             }
             is ApiResult.Error -> {

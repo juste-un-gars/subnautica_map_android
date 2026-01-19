@@ -1,35 +1,42 @@
 # SESSION_STATE.md
 
-**Last Updated:** 2026-01-19 12:00
-**Current Session:** SESSION_003_markers_fogofwar
-**Status:** Complete - Ready for testing
+**Last Updated:** 2026-01-19 15:30
+**Current Session:** SESSION_004_fog_fixes_fullscreen
+**Status:** Complete
 
 ---
 
 ## Current Session Summary
 
-### SESSION_003: Marker Info Popups & Fog of War
+### SESSION_004: Fog of War Fixes, Fullscreen Mode & UX Improvements
 
-**Goal:** Add clickable markers with info popups and fog of war system with persistence
+**Goal:** Fix fog of war alignment, make it fully opaque, use circular reveals, enable fullscreen mode, and add double-back-to-exit
 
-**Status:** Complete - Ready for testing
+**Status:** Complete
 
 **What was accomplished:**
 
-**Marker Info Popups:**
-- Added tap detection on map markers (player, beacons, vehicles)
-- Created info popup card showing details when marker is tapped
-- Added selection highlight ring around tapped markers
-- Popup shows: type, name, position, depth, and other relevant info
+**Fog of War Fixes:**
+- Fixed fog alignment issue: now correctly accounts for square map in portrait container
+- Added `effectiveMapSize` and `mapOffsetY` calculations for proper positioning
+- Map image is hidden until first data is received from server
+- Shows "Waiting for game data..." message while waiting for connection
+- Made fog completely opaque - hidden terrain is now invisible
+- Implemented **circular reveals** (50m radius) using `BlendMode.Clear` with `CompositingStrategy.Offscreen`
+- New `worldToMapPositionWithOffset()` function for correct marker positioning
+- New `drawFogOfWarCircles()` function for circular fog reveals
 
-**Fog of War System:**
-- Implemented chunk-based fog of war (50x50 world units per chunk = 50m)
-- Created FogOfWarRepository for persistence (saves to file)
-- Fog state saved automatically as player explores
-- Toggle fog on/off via cloud icon in toolbar
-- "Reset Exploration" option to clear all discovered areas
-- Exploration percentage displayed in info panel (e.g., "Explored: 2.3%")
-- Total 6400 chunks (80x80 grid covering 4000x4000 world)
+**Fullscreen Immersive Mode:**
+- App now launches in true fullscreen mode (no status bar, no navigation bar)
+- Added `FLAG_LAYOUT_NO_LIMITS` for full edge-to-edge display
+- Updated themes.xml with fullscreen and cutout mode settings
+- Uses immersive sticky mode - swipe from edge shows bars temporarily
+- Re-hides bars on focus change and resume
+
+**UX Improvements:**
+- Added **double-back-to-exit** functionality
+- First back press shows toast "Press back again to exit"
+- Second back press within 2 seconds closes the app
 
 ---
 
@@ -38,9 +45,9 @@
 To continue: `"continue"` or `"let's continue"`
 
 **Next steps to implement:**
-1. Test marker popups and fog of war
-2. Add "About" screen with credits (rocketsoup.net, libraries)
-3. Multiple map layers (caves, lost river, etc.)
+1. Add "About" screen with credits (rocketsoup.net, libraries)
+2. Multiple map layers (caves, lost river, etc.)
+3. Option to use detailed map vs blank map
 
 ---
 
@@ -48,6 +55,7 @@ To continue: `"continue"` or `"let's continue"`
 
 | Session | Date | Status | Summary |
 |---------|------|--------|---------|
+| SESSION_004 | 2026-01-19 | Complete | Fog fixes, fullscreen, circular reveals, double-back-to-exit |
 | SESSION_003 | 2026-01-19 | Complete | Marker popups & fog of war |
 | SESSION_002 | 2026-01-19 | Complete | Interactive map with zoom/pan |
 | SESSION_001 | 2026-01-19 | Complete | Initial Android app setup |
@@ -71,38 +79,43 @@ To continue: `"continue"` or `"let's continue"`
 - [x] Beacon markers
 - [x] Clickable markers with info popups
 - [x] Fog of war with persistence
+- [x] Circular fog reveals (50m radius)
+- [x] Fullscreen immersive mode
+- [x] Double-back-to-exit
 
 ### Planned
 - [ ] About screen with credits
 - [ ] Map options:
   - [ ] Option to use detailed map (map-details.jpg) vs blank map (map-blank.jpg)
-  - [ ] Easy toggle for fog of war (already exists in menu, maybe add to settings)
 - [ ] Multiple map layers (caves, lost river, etc.)
 
 ---
 
-## Files Modified This Session
-
-### New Files
-- `app/src/main/java/com/music/music/subnauticamap/data/repository/FogOfWarRepository.kt`
+## Files Modified This Session (SESSION_004)
 
 ### Modified Files
-- `app/src/main/java/com/music/music/subnauticamap/ui/map/components/InteractiveMapView.kt`
-  - Added tap detection for markers
-  - Added SelectedMarker sealed class
-  - Added MarkerInfoCard popup
-  - Added fog of war rendering
-  - Added chunk utility functions
-- `app/src/main/java/com/music/music/subnauticamap/ui/map/MapViewModel.kt`
-  - Added FogOfWarRepository integration
-  - Added toggleFogOfWar() and resetFogOfWar()
-  - Added exploration tracking in polling
-- `app/src/main/java/com/music/music/subnauticamap/ui/map/MapScreen.kt`
-  - Added fog of war menu in toolbar
-  - Added exploration stats to info panel
-  - Updated InteractiveMapView call with fog parameters
 - `app/src/main/java/com/music/music/subnauticamap/MainActivity.kt`
-  - Added FogOfWarRepository creation
+  - Added setupFullscreen() with FLAG_LAYOUT_NO_LIMITS
+  - Added hideSystemBars() with WindowInsetsControllerCompat
+  - Added onWindowFocusChanged and onResume to maintain fullscreen
+  - Added BackHandler for double-back-to-exit functionality
+  - Added Toast message for first back press
+- `app/src/main/java/com/music/music/subnauticamap/ui/map/MapViewModel.kt`
+  - Added `hasReceivedData` flag to MapUiState
+  - Set hasReceivedData = true when data is received successfully
+- `app/src/main/java/com/music/music/subnauticamap/ui/map/MapScreen.kt`
+  - Pass hasReceivedData to InteractiveMapView
+- `app/src/main/java/com/music/music/subnauticamap/ui/map/components/InteractiveMapView.kt`
+  - Added hasReceivedData parameter
+  - Hide map content until data is received
+  - Added "Waiting for game data..." loading state
+  - Added effectiveMapSize and mapOffsetY for correct positioning
+  - Added worldToMapPositionWithOffset() function
+  - Added drawFogOfWarCircles() with BlendMode.Clear and CompositingStrategy.Offscreen
+  - Fixed findTappedMarker to use correct coordinates
+- `app/src/main/res/values/themes.xml`
+  - Added windowFullscreen, windowLayoutInDisplayCutoutMode
+  - Added windowTranslucentStatus/Navigation for true fullscreen
 
 ---
 
@@ -110,9 +123,15 @@ To continue: `"continue"` or `"let's continue"`
 
 **Chunk System:**
 - World size: 4000m x 4000m (-2000 to +2000 on X and Z)
-- Chunk size: 50m x 50m (user requested ~50m visibility)
+- Chunk size: 50m x 50m (50m visibility radius)
 - Grid: 80 x 80 = 6400 total chunks
 - Storage: Binary file with packed Long keys (8 bytes per chunk)
+- Circular reveals with radius = chunkPixelSize * 0.7 for smooth overlap
+
+**Rendering:**
+- Uses `CompositingStrategy.Offscreen` for BlendMode.Clear to work
+- Draws black rectangle over map area first
+- Then cuts out circles with `BlendMode.Clear` for explored chunks
 
 **Chunk Key Encoding:**
 ```kotlin
@@ -137,8 +156,8 @@ chunkZ = ((2000 - worldZ) / 50).toInt()
 - User wants "About" screen to credit:
   - Map creator: rocketsoup.net/blog
   - Libraries used (Retrofit, Coil, etc.)
-- Consider adding smooth fog edges (gradient instead of hard edges)
 - Could add mini-map in corner showing explored areas
+- Consider option to switch between detailed and blank map
 
 ---
 
