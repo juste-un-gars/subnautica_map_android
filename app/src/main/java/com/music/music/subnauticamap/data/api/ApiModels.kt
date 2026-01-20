@@ -23,12 +23,19 @@ data class GameState(
  */
 data class PlayerInfo(
     @SerializedName("Position") val position: Vector3,
-    @SerializedName("Heading") val heading: Float,
+    @SerializedName("Heading") private val headingRaw: Any?,
     @SerializedName("Depth") val depth: String,
     @SerializedName("Biome") val biome: String
 ) {
     val depthFloat: Float
         get() = depth.toFloatOrNull() ?: 0f
+
+    val heading: Float
+        get() = when (headingRaw) {
+            is Number -> headingRaw.toFloat()
+            is String -> headingRaw.toFloatOrNull() ?: 0f
+            else -> 0f
+        }
 }
 
 /**

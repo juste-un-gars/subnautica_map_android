@@ -991,7 +991,7 @@ private fun InfoOverlayPanel(
                     tint = SubnauticaColors.BioluminescentBlue,
                     modifier = Modifier
                         .size(20.dp)
-                        .rotate(player?.heading ?: 0f)
+                        .rotate(normalizeHeading(player?.heading ?: 0f))
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
@@ -1032,7 +1032,7 @@ private fun InfoOverlayPanel(
                 InfoRow(
                     label = stringResource(R.string.player_heading),
                     value = "%.0f° %s".format(
-                        player.heading,
+                        normalizeHeading(player.heading),
                         getHeadingDirection(player.heading)
                     )
                 )
@@ -1107,15 +1107,23 @@ private fun getDepthColor(depth: Float): Color {
     }
 }
 
+/**
+ * Normalize heading to 0-360 range (handles negative values from API)
+ */
+private fun normalizeHeading(heading: Float): Float {
+    return ((heading % 360) + 360) % 360
+}
+
 private fun getHeadingDirection(heading: Float): String {
+    val normalizedHeading = normalizeHeading(heading)
     return when {
-        heading < 22.5 || heading >= 337.5 -> "N"
-        heading < 67.5 -> "NE"
-        heading < 112.5 -> "E"
-        heading < 157.5 -> "SE"
-        heading < 202.5 -> "S"
-        heading < 247.5 -> "SW"
-        heading < 292.5 -> "W"
+        normalizedHeading < 22.5 || normalizedHeading >= 337.5 -> "N"
+        normalizedHeading < 67.5 -> "NE"
+        normalizedHeading < 112.5 -> "E"
+        normalizedHeading < 157.5 -> "SE"
+        normalizedHeading < 202.5 -> "S"
+        normalizedHeading < 247.5 -> "SW"
+        normalizedHeading < 292.5 -> "W"
         else -> "NW"
     }
 }
