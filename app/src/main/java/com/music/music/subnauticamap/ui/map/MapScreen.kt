@@ -75,6 +75,12 @@ fun MapScreen(
     var newMarkerName by remember { mutableStateOf("") }
     var newMarkerColor by remember { mutableIntStateOf(0) }
 
+    // Edit marker dialog state
+    var showEditMarkerDialog by remember { mutableStateOf(false) }
+    var markerToEdit by remember { mutableStateOf<com.music.music.subnauticamap.data.repository.CustomMarker?>(null) }
+    var editMarkerName by remember { mutableStateOf("") }
+    var editMarkerColor by remember { mutableIntStateOf(0) }
+
     // Follow player mode - enabled by default
     var isFollowingPlayer by remember { mutableStateOf(true) }
     var hasInitializedPosition by remember { mutableStateOf(false) }
@@ -600,6 +606,12 @@ fun MapScreen(
                     showAddMarkerDialog = true
                 },
                 onCustomMarkerDelete = { viewModel.deleteCustomMarker(it) },
+                onCustomMarkerEdit = { marker ->
+                    markerToEdit = marker
+                    editMarkerName = marker.label
+                    editMarkerColor = marker.colorIndex
+                    showEditMarkerDialog = true
+                },
                 modifier = Modifier.fillMaxSize(),
                 showPlayer = uiState.visibility.showPlayer,
                 showBeacons = uiState.visibility.showBeacons,
@@ -777,6 +789,123 @@ fun MapScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showResetFogConfirmDialog = false }) {
+                    Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                }
+            },
+            containerColor = SubnauticaColors.OceanDeep,
+            titleContentColor = Color.White,
+            textContentColor = Color.White
+        )
+    }
+
+    // Edit marker dialog
+    if (showEditMarkerDialog && markerToEdit != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showEditMarkerDialog = false
+                markerToEdit = null
+            },
+            title = {
+                Text(
+                    "Edit Marker",
+                    color = Color.White
+                )
+            },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = editMarkerName,
+                        onValueChange = { editMarkerName = it },
+                        label = { Text("Marker name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = SubnauticaColors.BioluminescentBlue,
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.5f),
+                            focusedLabelColor = SubnauticaColors.BioluminescentBlue,
+                            unfocusedLabelColor = Color.White.copy(alpha = 0.7f),
+                            cursorColor = SubnauticaColors.BioluminescentBlue
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "Color:",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        repeat(8) { colorIndex ->
+                            val isSelected = editMarkerColor == colorIndex
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(SubnauticaColors.getBeaconColor(colorIndex))
+                                    .then(
+                                        if (isSelected) Modifier.background(
+                                            Color.White.copy(alpha = 0.3f),
+                                            CircleShape
+                                        ) else Modifier
+                                    )
+                                    .clickable { editMarkerColor = colorIndex },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    markerToEdit?.let { marker ->
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "Position: X=%.0f, Z=%.0f\nDepth: %.1f m".format(
+                                marker.x,
+                                marker.z,
+                                marker.depth
+                            ),
+                            color = Color.White.copy(alpha = 0.5f),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (editMarkerName.isNotBlank() && markerToEdit != null) {
+                            val updated = markerToEdit!!.copy(
+                                label = editMarkerName.trim(),
+                                colorIndex = editMarkerColor
+                            )
+                            viewModel.updateCustomMarker(updated)
+                            showEditMarkerDialog = false
+                            markerToEdit = null
+                        }
+                    },
+                    enabled = editMarkerName.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = SubnauticaColors.BioluminescentBlue
+                    )
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showEditMarkerDialog = false
+                    markerToEdit = null
+                }) {
                     Text("Cancel", color = Color.White.copy(alpha = 0.7f))
                 }
             },

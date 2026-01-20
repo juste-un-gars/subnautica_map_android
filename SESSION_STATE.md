@@ -1,44 +1,46 @@
 # SESSION_STATE.md
 
-**Last Updated:** 2026-01-19 23:50
-**Current Session:** SESSION_010_release_v1
+**Last Updated:** 2026-01-20 13:20
+**Current Session:** SESSION_012_edit_markers
 **Status:** Complete
 
 ---
 
 ## Current Session Summary
 
-### SESSION_010: Release v1.0 - Player Centering Fix
+### SESSION_012: Edit Custom Markers
 
-**Goal:** Fix player centering issue and prepare release v1.0
+**Goal:** Add the ability to edit existing custom markers (change name and/or color)
 
 **Status:** Complete
 
 **What was accomplished:**
 
-**1. Player Centering Fix:**
-- Fixed: Player was not centered on screen in follow mode
-- Root cause: `centerMapOnPlayer()` used hardcoded `1000f` instead of actual map size
-- Solution: Store container dimensions in `MapState` and use `effectiveMapSize` for calculations
-- Added `containerWidth`, `containerHeight`, and `effectiveMapSize` to MapState class
+**1. InteractiveMapView.kt:**
+- Added `onCustomMarkerEdit: (CustomMarker) -> Unit` callback parameter
+- Added `onEditCustomMarker` parameter to `MarkerInfoCard`
+- Added Edit button (blue pencil icon) next to Delete button for custom markers
 
-**2. Release v1.0 Preparation:**
-- All core features complete and tested
-- Ready for first public release
+**2. MapScreen.kt:**
+- Added state variables: `showEditMarkerDialog`, `markerToEdit`, `editMarkerName`, `editMarkerColor`
+- Connected `onCustomMarkerEdit` callback to populate state and show dialog
+- Added AlertDialog for editing markers with pre-filled name and color picker
+- Calls `viewModel.updateCustomMarker(updated)` on save
+
+**3. Version bump:**
+- Updated to v1.1.0 (versionCode 2)
+
+**4. Build:**
+- Created signed release APK
 
 ---
 
 ## Files Modified This Session
 
 ### Modified Files
-- `InteractiveMapView.kt` - Added container dimensions to MapState
-- `MapScreen.kt` - Fixed centerMapOnPlayer() to use actual map size
-
----
-
-## Quick Resume
-
-To continue: `"continue"` or `"let's continue"`
+- `app/build.gradle.kts` - Version bump to 1.1.0
+- `app/src/main/java/.../ui/map/MapScreen.kt` - Edit dialog state and UI
+- `app/src/main/java/.../ui/map/components/InteractiveMapView.kt` - Edit callback and button
 
 ---
 
@@ -46,7 +48,9 @@ To continue: `"continue"` or `"let's continue"`
 
 | Session | Date | Status | Summary |
 |---------|------|--------|---------|
-| SESSION_010 | 2026-01-19 | Complete | Release v1.0, player centering fix |
+| SESSION_012 | 2026-01-20 | Complete | Edit custom markers feature |
+| SESSION_011 | 2026-01-20 | Complete | README.md documentation |
+| SESSION_010 | 2026-01-19 | Complete | Release v1.0, player centering fix, signed APK |
 | SESSION_009 | 2026-01-19 | Complete | Follow mode, settings menu, backup fix |
 | SESSION_008 | 2026-01-19 | Complete | About, map options, custom markers, backup |
 | SESSION_007 | 2026-01-19 | Complete | Visibility toggle button, fog diameter 100m |
@@ -61,7 +65,7 @@ To continue: `"continue"` or `"let's continue"`
 
 ## Project Progress
 
-### Completed (v1.0 Release)
+### Completed (v1.1 Release)
 - [x] Android project structure
 - [x] API models (GameState, PlayerInfo, etc.)
 - [x] Retrofit API service
@@ -95,31 +99,15 @@ To continue: `"continue"` or `"let's continue"`
 - [x] Settings menu in map screen
 - [x] Reset exploration confirmation
 - [x] Backup fix for custom markers
-- [x] **Player centering fix**
+- [x] Player centering fix
+- [x] Signed release APK
+- [x] README.md documentation
+- [x] **Edit custom markers (name & color)**
 
-### Future Ideas (v1.1+)
+### Future Ideas (v1.2+)
 - Settings screen with more options
 - Distance to markers display
 - Marker search/filter
-- Marker editing (rename, change color)
-
----
-
-## Top Bar Buttons (Left to Right)
-
-1. **Eye icon** - Visibility toggle (player, beacons, vehicles, markers)
-2. **Layers icon** - Map settings (detailed/blank, layer selection)
-3. **Cloud icon** - Fog of war (enable/disable, reset with confirmation)
-4. **Info icon** - Toggle info panel
-5. **Gear icon** - Settings (About, Export Backup, Restore Backup)
-6. **Status indicator** - Connection status
-
-## Right Side Buttons (Top to Bottom)
-
-1. **Add Location (orange)** - Save current position as marker
-2. **GPS/Location (green/blue)** - Center on player / Follow mode indicator
-3. **Plus** - Zoom in
-4. **Minus** - Zoom out
 
 ---
 
@@ -127,6 +115,19 @@ To continue: `"continue"` or `"let's continue"`
 
 | Version | Date | Notes |
 |---------|------|-------|
-| v1.0 | 2026-01-19 | First release - all core features |
+| v1.1.0 | 2026-01-20 | Edit custom markers feature |
+| v1.0.0 | 2026-01-19 | First release - all core features, signed APK |
+
+---
+
+## Build Instructions
+
+```bash
+# Build signed release APK
+./gradlew assembleRelease
+
+# Output location
+app/build/outputs/apk/release/app-release.apk
+```
 
 ---

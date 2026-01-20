@@ -174,6 +174,7 @@ fun InteractiveMapView(
     onUserInteraction: () -> Unit = {},
     onAddMarker: () -> Unit = {},
     onCustomMarkerDelete: (String) -> Unit = {},
+    onCustomMarkerEdit: (CustomMarker) -> Unit = {},
     modifier: Modifier = Modifier,
     showPlayer: Boolean = true,
     showBeacons: Boolean = true,
@@ -410,6 +411,10 @@ fun InteractiveMapView(
                     onDismiss = { selectedMarker = null },
                     onDeleteCustomMarker = { markerId ->
                         onCustomMarkerDelete(markerId)
+                    },
+                    onEditCustomMarker = { customMarker ->
+                        onCustomMarkerEdit(customMarker)
+                        selectedMarker = null
                     }
                 )
             }
@@ -577,7 +582,8 @@ private fun findTappedMarker(
 private fun MarkerInfoCard(
     marker: SelectedMarker,
     onDismiss: () -> Unit,
-    onDeleteCustomMarker: (String) -> Unit = {}
+    onDeleteCustomMarker: (String) -> Unit = {},
+    onEditCustomMarker: (CustomMarker) -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -637,8 +643,19 @@ private fun MarkerInfoCard(
                 }
 
                 Row {
-                    // Delete button for custom markers
+                    // Edit and Delete buttons for custom markers
                     if (marker is SelectedMarker.Custom) {
+                        IconButton(
+                            onClick = { onEditCustomMarker(marker.marker) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = "Edit marker",
+                                tint = SubnauticaColors.BioluminescentBlue.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                         IconButton(
                             onClick = {
                                 onDeleteCustomMarker(marker.marker.id)
